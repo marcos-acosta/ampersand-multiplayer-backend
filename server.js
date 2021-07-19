@@ -20,12 +20,12 @@ const io = socketIO(server, {
   }
 });
 
-const sendGameUpdate = async (emitter, room_id) => {
+const sendStartInfo = async (emitter, room_id) => {
   let game_data = {
     ...rooms[room_id]
   }
   delete game_data.socket_to_idx
-  await emitter.to(room_id).emit("game_data", game_data);
+  await emitter.to(room_id).emit("start_info", game_data);
 };
 
 const rooms = {}
@@ -38,7 +38,7 @@ app.get('/', (req, res) => {
 
 app.post('/room_available', (req, res) => {
   res.send({
-    num_players: rooms.hasOwnProperty(req.body.room_id) ? rooms[req.body.room_id].players.length : 0
+    num_players: rooms.hasOwnProperty(req.body.room_id) ? Object.keys(rooms[req.body.room_id].players).length : 0
   });
 });
 
@@ -48,7 +48,7 @@ app.post('/uniquely_identifying', (req, res) => {
     res.send({unique: true, reasons: []});
   } else {
     let players = rooms[req.body.room_id].players;
-    let player_one = players[0];
+    let player_one = players[Object.keys(players)[0]];
     let username_unique = req.body.username !== player_one.username;
     let appearance_unique = req.body.color !== player_one.color || req.body.character !== player_one.character;
     let reasons = [];
@@ -68,10 +68,10 @@ app.post('/uniquely_identifying', (req, res) => {
 io.on("connection", (socket) => {
   socket.on("join_room", async (data) => {
     let player = {
-      username: data.username,
       contribution: 0,
       color: data.color,
-      character: data.character
+      character: data.character,
+      socket_id: socket.id
     }
     if (rooms.hasOwnProperty(data.room_id)) {
       let room = rooms[data.room_id];
@@ -80,14 +80,12 @@ io.on("connection", (socket) => {
       } else {
         // slice() returns a copy
         player.position = START_POINT_P2.slice();
-        room.players.push(player);
-        // Map this socket id to index 1
-        room.socket_to_idx[socket.id] = 1;
+        room.players[data.username] = player;
         socket.join(data.room_id);
       }
     } else {
       rooms[data.room_id] = {
-        players: [],
+        players: {},
         enemies: [],
         bombs: [],
         nukes: [],
@@ -96,37 +94,30 @@ io.on("connection", (socket) => {
         turns: 0,
         score: 0,
         bombs: 3,
-        socket_to_idx: {}
       }
       player.position = START_POINT_P1.slice();
-      rooms[data.room_id].players.push(player);
-      // Map this socket id to index 0
-      rooms[data.room_id].socket_to_idx[socket.id] = 0;
+      rooms[data.room_id].players[data.username] = player;
       socket.join(data.room_id);
     }
-    // console.log(rooms);
-    await sendGameUpdate(io, data.room_id);
+    if (Object.keys(rooms[data.room_id].players).length === 2) {
+      await sendStartInfo(io, data.room_id);
+    }
   });
 
   socket.on("disconnect", () => {
-    let roomLeftKey = Object.keys(rooms).filter(room => {
-      let socket_to_idx = rooms[room].socket_to_idx;
-      return socket_to_idx.hasOwnProperty(socket.id);
-    });
-    if (roomLeftKey.length > 0) {
-      // Get room
-      let roomLeft = rooms[roomLeftKey[0]];
-      // Get index of player in players list
-      let playerIndex = roomLeft.socket_to_idx[socket.id];
-      // Delete socket to index mapping
-      delete roomLeft.socket_to_idx[socket.id];
-      // Dete player using index
-      roomLeft.players.splice(playerIndex, 1);
-      // Delete room if no one left
-      if (roomLeft.players.length === 0) {
-        delete rooms[roomLeftKey];
+    let room_keys = Object.keys(rooms);
+    for (let i = 0; i < room_keys.length; i++) {
+      let room = rooms[room_keys[i]];
+      let usernames = Object.keys(room.players);
+      for (let j = 0; j < usernames.length; j++) {
+        let player = room.players[usernames[j]];
+        if (player.socket_id === socket.id) {
+          delete room.players[usernames[j]];
+          if (Object.keys(room.players).length === 0) {
+            delete rooms[room_keys[i]];
+          }
+        }
       }
     }
-    // console.log(rooms);
   });
 })
