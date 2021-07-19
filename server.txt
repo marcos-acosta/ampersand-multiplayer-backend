@@ -1,0 +1,29 @@
+"" means literal name of the key
+no "" means the actual value is variable, like a player's username
+
+rooms = {
+  room_id: {                            // information about room / game
+    "players": {                        // information about individual players
+      username: {                       // username is unique
+        "contribution": 0,              // contribution to the total score
+        "position": [x, y],             // your position, (0, 0) = bottom left for intuitiveness
+        "socket_id": 'xGfe3AWdAWdwiD',  // socket id
+        "color": 'green',               // color of character
+        "character": '&'                // symbol on character
+      },
+      ...                               // at most 1 more player
+    },
+    "enemies": [[x, y], ...],           // positions of enemies (might need more info on enemies, like a unique id)
+    "bombs": [[x, y], ...],             // positions of collectable bombs (see above)
+    "nukes": [[x, y], ...],             // position(s) of nukes (see above)
+    "blocked": [[x, y], ...],           // squares on the board that act as walls (can't move through, can bump up against)
+    "waiting_on": 2,                    // how many players need to move before the enemies move
+    "turns": 0,                         // how many turns have elapsed
+    "bombs": 0,                         // how many bombs the players have in total
+    "id_to_username": {                 // mapping from socket ids to usernames
+      socket_id: username,
+      ...                               // at most 1 more mapping
+    }
+  },
+  ...                                   // more rooms
+}

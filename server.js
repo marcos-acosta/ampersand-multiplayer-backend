@@ -29,8 +29,8 @@ const sendStartInfo = async (emitter, room_id) => {
 };
 
 const rooms = {}
-const START_POINT_P1 = [5, 3];
-const START_POINT_P2 = [5, 8];
+const START_POINT_P1 = [4, 3];
+const START_POINT_P2 = [4, 5];
 
 app.get('/', (req, res) => {
   res.send("GENERAL KENOBI: Hello there.")
@@ -81,6 +81,7 @@ io.on("connection", (socket) => {
         // slice() returns a copy
         player.position = START_POINT_P2.slice();
         room.players[data.username] = player;
+        room.id_to_username[socket.id] = data.username;
         socket.join(data.room_id);
       }
     } else {
@@ -90,18 +91,30 @@ io.on("connection", (socket) => {
         bombs: [],
         nukes: [],
         blocked: [],
-        waiting_on: 0,
+        waiting_on: 2,
         turns: 0,
-        score: 0,
         bombs: 3,
+        id_to_username: {}
       }
       player.position = START_POINT_P1.slice();
       rooms[data.room_id].players[data.username] = player;
+      rooms[data.room_id].id_to_username[socket.id] = data.username;
       socket.join(data.room_id);
     }
     if (Object.keys(rooms[data.room_id].players).length === 2) {
       await sendStartInfo(io, data.room_id);
     }
+  });
+
+  socket.on("keypress", (data) => {
+    let room_id = data.room_id;
+    let key = data.key;
+    // Just checking
+    if (!rooms.hasOwnProperty(room_id)) {
+      return
+    }
+    let username = rooms[room_id].id_to_username[socket.id];
+    console.log(`${username} pressed key ${key} in room ${room_id}`);
   });
 
   socket.on("disconnect", () => {
@@ -113,6 +126,7 @@ io.on("connection", (socket) => {
         let player = room.players[usernames[j]];
         if (player.socket_id === socket.id) {
           delete room.players[usernames[j]];
+          delete room.id_to_username[socket.id];
           if (Object.keys(room.players).length === 0) {
             delete rooms[room_keys[i]];
           }
