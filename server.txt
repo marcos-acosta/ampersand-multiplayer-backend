@@ -9,7 +9,8 @@ rooms = {
         "position": [x, y],             // your position, (0, 0) = bottom left for intuitiveness
         "socket_id": 'xGfe3AWdAWdwiD',  // socket id
         "color": 'green',               // color of character
-        "character": '&'                // symbol on character
+        "character": '&',               // symbol on character
+        "went": false,                  // whether the player made their move (and therefore can't move again yet)
       },
       ...                               // at most 1 more player
     },
@@ -17,7 +18,6 @@ rooms = {
     "bombs": [[x, y], ...],             // positions of collectable bombs (see above)
     "nukes": [[x, y], ...],             // position(s) of nukes (see above)
     "blocked": [[x, y], ...],           // squares on the board that act as walls (can't move through, can bump up against)
-    "waiting_on": 2,                    // how many players need to move before the enemies move
     "turns": 0,                         // how many turns have elapsed
     "bombs": 0,                         // how many bombs the players have in total
     "id_to_username": {                 // mapping from socket ids to usernames

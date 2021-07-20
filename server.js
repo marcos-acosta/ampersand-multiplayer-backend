@@ -16,7 +16,8 @@ const server = app.listen(port, () => {
 const io = socketIO(server, {
   cors: {
     credentials: true,
-    origin: "http://localhost:3000"
+    // origin: "http://localhost:3000"
+    origin: "https://ampersand-mp.netlify.app"
   }
 });
 
@@ -28,9 +29,32 @@ const sendStartInfo = async (emitter, room_id) => {
   await emitter.to(room_id).emit("start_info", game_data);
 };
 
+const KEY_TO_DIRECTION = {
+  'w': [0, 1],
+  'a': [-1, 0],
+  's': [0, -1],
+  'd': [1, 0]
+};
+
+const addVectors = (a, b) => {
+  return [a[0] + b[0], a[1] + b[1]];
+}
+
+const protectRoomData = (room) => {
+  let cleanRoomData = {
+    ...room
+  }
+  delete cleanRoomData.id_to_username;
+  let usernames = Object.keys(cleanRoomData.players);
+  usernames.forEach((username) => {
+    delete cleanRoomData.players[username].socket_id;
+  });
+  return cleanRoomData;
+}
+
 const rooms = {}
-const START_POINT_P1 = [4, 3];
-const START_POINT_P2 = [4, 5];
+const START_POINT_P1 = [3, 4];
+const START_POINT_P2 = [5, 4];
 
 app.get('/', (req, res) => {
   res.send("GENERAL KENOBI: Hello there.")
@@ -66,13 +90,15 @@ app.post('/uniquely_identifying', (req, res) => {
 });
 
 io.on("connection", (socket) => {
-  socket.on("join_room", async (data) => {
+  // console.log('connect!');
+  // console.log(io.sockets.sockets.keys());
+  socket.on("join_room", (data) => {
     let player = {
       contribution: 0,
       color: data.color,
       character: data.character,
-      socket_id: socket.id
-    }
+      socket_id: socket.id,
+    };
     if (rooms.hasOwnProperty(data.room_id)) {
       let room = rooms[data.room_id];
       if (room.players.length >= 2) {
@@ -81,7 +107,8 @@ io.on("connection", (socket) => {
         // slice() returns a copy
         player.position = START_POINT_P2.slice();
         room.players[data.username] = player;
-        room.id_to_username[socket.id] = data.username;
+        room.id_to_username[  socket.id] = data.username;
+        room.order.push(data.username);
         socket.join(data.room_id);
       }
     } else {
@@ -91,10 +118,12 @@ io.on("connection", (socket) => {
         bombs: [],
         nukes: [],
         blocked: [],
-        waiting_on: 2,
         turns: 0,
         bombs: 3,
-        id_to_username: {}
+        id_to_username: {},
+        order: [data.username],
+        whose_turn: -1,
+        score: 0,
       }
       player.position = START_POINT_P1.slice();
       rooms[data.room_id].players[data.username] = player;
@@ -102,36 +131,51 @@ io.on("connection", (socket) => {
       socket.join(data.room_id);
     }
     if (Object.keys(rooms[data.room_id].players).length === 2) {
-      await sendStartInfo(io, data.room_id);
+      rooms[data.room_id].whose_turn = 0;
+      sendStartInfo(io, data.room_id);
     }
+    // console.log(rooms);
   });
 
   socket.on("keypress", (data) => {
-    let room_id = data.room_id;
-    let key = data.key;
-    // Just checking
-    if (!rooms.hasOwnProperty(room_id)) {
-      return
+    let room_id = data.room_id, key = data.key;
+    try {
+      let room = rooms[room_id]
+      let username = room.id_to_username[socket.id];
+      // Not your turn, buddy
+      if (room.order[room.whose_turn] !== username) {
+        return
+      }
+      let position = room.players[username].position;
+      room.players[username].position = addVectors(position, KEY_TO_DIRECTION[key]);
+      if (room.whose_turn === room.order.length - 1) {
+        room.score += 1
+        // Move enemies
+      }
+      room.whose_turn = (room.whose_turn + 1) % room.order.length;
+      io.to(room_id).emit("game_update", protectRoomData(room));
+    } catch (e) {
+      // Do nothing
     }
-    let username = rooms[room_id].id_to_username[socket.id];
-    console.log(`${username} pressed key ${key} in room ${room_id}`);
   });
 
   socket.on("disconnect", () => {
     let room_keys = Object.keys(rooms);
     for (let i = 0; i < room_keys.length; i++) {
       let room = rooms[room_keys[i]];
-      let usernames = Object.keys(room.players);
-      for (let j = 0; j < usernames.length; j++) {
-        let player = room.players[usernames[j]];
-        if (player.socket_id === socket.id) {
-          delete room.players[usernames[j]];
-          delete room.id_to_username[socket.id];
-          if (Object.keys(room.players).length === 0) {
-            delete rooms[room_keys[i]];
-          }
+      if (room.id_to_username.hasOwnProperty(socket.id)) {
+        let username = room.id_to_username[socket.id];
+        delete room.id_to_username[socket.id];
+        delete room.players[username];
+        if (Object.keys(room.players).length === 0) {
+          delete rooms[room_keys[i]];
         }
+        let indexInOrder = room.order.findIndex((uname) => uname === username);
+        room.order.splice(indexInOrder, 1);
       }
     }
+    // console.log(rooms);
+    // console.log('disconnect!');
+    // console.log(io.sockets.sockets.keys());
   });
 })
