@@ -29,12 +29,17 @@ const sendStartInfo = async (emitter, room_id) => {
   await emitter.to(room_id).emit("start_info", game_data);
 };
 
+const BOARD_WIDTH = 9;
 const KEY_TO_DIRECTION = {
   'w': [0, 1],
   'a': [-1, 0],
   's': [0, -1],
   'd': [1, 0]
 };
+
+const posInBounds = (pos) => {
+  return pos[0] >= 0 && pos[0] < BOARD_WIDTH && pos[1] >= 0 && pos[1] < BOARD_WIDTH;
+}
 
 const addVectors = (a, b) => {
   return [a[0] + b[0], a[1] + b[1]];
@@ -94,7 +99,6 @@ io.on("connection", (socket) => {
   // console.log(io.sockets.sockets.keys());
   socket.on("join_room", (data) => {
     let player = {
-      contribution: 0,
       color: data.color,
       character: data.character,
       socket_id: socket.id,
@@ -147,13 +151,23 @@ io.on("connection", (socket) => {
         return
       }
       let position = room.players[username].position;
-      room.players[username].position = addVectors(position, KEY_TO_DIRECTION[key]);
+      let direction = KEY_TO_DIRECTION[key];
+      let proposed_pos = addVectors(position, direction);
+      if (posInBounds(proposed_pos)) {
+        room.players[username].position = proposed_pos;
+      }
       if (room.whose_turn === room.order.length - 1) {
         room.score += 1
         // Move enemies
       }
       room.whose_turn = (room.whose_turn + 1) % room.order.length;
-      io.to(room_id).emit("game_update", protectRoomData(room));
+      let returnData = {
+        ...protectRoomData(room),
+        keyPressed: key,
+        direction: direction,
+        playerMoved: username
+      };
+      io.to(room_id).emit("game_update", returnData);
     } catch (e) {
       // Do nothing
     }

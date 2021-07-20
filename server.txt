@@ -5,12 +5,10 @@ rooms = {
   room_id: {                            // information about room / game
     "players": {                        // information about individual players
       username: {                       // username is unique
-        "contribution": 0,              // contribution to the total score
         "position": [x, y],             // your position, (0, 0) = bottom left for intuitiveness
         "socket_id": 'xGfe3AWdAWdwiD',  // socket id
         "color": 'green',               // color of character
         "character": '&',               // symbol on character
-        "went": false,                  // whether the player made their move (and therefore can't move again yet)
       },
       ...                               // at most 1 more player
     },
@@ -20,6 +18,9 @@ rooms = {
     "blocked": [[x, y], ...],           // squares on the board that act as walls (can't move through, can bump up against)
     "turns": 0,                         // how many turns have elapsed
     "bombs": 0,                         // how many bombs the players have in total
+    "score": 0,                         // total score
+    "order": ["username1", ...],        // turn order
+    "whose_turn": 0,                    // indicates which player's turn it is (in "order")
     "id_to_username": {                 // mapping from socket ids to usernames
       socket_id: username,
       ...                               // at most 1 more mapping
