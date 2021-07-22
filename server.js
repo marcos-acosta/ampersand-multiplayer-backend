@@ -36,13 +36,233 @@ const KEY_TO_DIRECTION = {
   's': [0, -1],
   'd': [1, 0]
 };
+const UP = [0, 1];
+const RIGHT = [1, 0];
+const DOWN = [0, -1];
+const LEFT = [-1, 0];
+const UP_RIGHT = [1, 1];
+const UP_LEFT = [-1, 1];
+const DOWN_LEFT = [-1, -1];
+const DOWN_RIGHT = [1, -1];
+const ALL_DIRECTIONS = [UP, RIGHT, DOWN, LEFT, UP_RIGHT, UP_LEFT, DOWN_LEFT, DOWN_RIGHT]
+
+const distance = (coord_1, coord_2) => {
+  return Math.sqrt(Math.pow(coord_1[0] - coord_2[0], 2) + Math.pow(coord_1[1] - coord_2[1], 2));
+}
+
+const closestIndex = (distances) => {
+  if (distances.length === 1) {
+    return 0;
+  } else {
+    return distances[0] < distances[1] ? 0 : 1;
+  }
+}
+
+const candidateDirections = (startPosition, targetPosition) => {
+  let direction = subtractVectors(targetPosition, startPosition);
+  // Orthogonal
+  if (direction[0] === 0 || direction[1] === 0) {
+    let orthogonal = makeOrthogonalUnitVector(direction);
+    let potentials;
+    // Going up or down, so left/right is ok too
+    if (direction[0] === 0) {
+      potentials = shuffleArray([LEFT, RIGHT]);
+    // Going left or right, so up/down is ok too
+    } else {
+      potentials = shuffleArray([UP, DOWN]);
+    }
+    return [orthogonal, ...potentials];
+  }
+  // Not orthogonal
+  else {
+    if (Math.abs(direction[0]) === Math.abs(direction[1])) {
+      if (direction[0] > 0 && direction[1] > 0) {
+        return shuffleArray([UP, RIGHT]);
+      } else if (direction[0] < 0 && direction[1] > 0) {
+        return shuffleArray([UP, LEFT]);
+      } else if (direction[0] < 0 && direction[0] < 0) {
+        return shuffleArray([DOWN, LEFT]);
+      } else {
+        return shuffleArray([DOWN, RIGHT]);
+      }
+    } else {
+      if (direction[0] > Math.abs(direction[1])) {
+        if (direction[1] > 0) {
+          return [RIGHT, UP];
+        } else {
+          return [DOWN, UP];
+        }
+      } else if (direction[1] > Math.abs(direction[0])) {
+        if (direction[0] > 0) {
+          return [UP, RIGHT];
+        } else {
+          return [UP, LEFT];
+        }
+      } else if (-direction[0] > Math.abs(direction[1])) {
+        if (direction[1] > 0) {
+          return [LEFT, UP];
+        } else {
+          return [LEFT, DOWN];
+        }
+      } else {
+        if (direction[0] > 0) {
+          return [DOWN, RIGHT];
+        } else {
+          return [DOWN, LEFT];
+        }
+      }
+    }
+  }
+}
+
+const moveEnemies = (room) => {
+  let userPositions = getAlivePlayers(room).map(username => room.players[username].position);
+  let enemies = room.enemies;
+  for (let i = 0; i < enemies.length; i++) {
+    let enemyPosition = enemies[i].position;
+    let distances = userPositions.map(userPosition => distance(enemyPosition, userPosition));
+    let closerPosition = userPositions[closestIndex(distances)];
+    let candidateMoves = candidateDirections(enemyPosition, closerPosition);
+    for (let j = 0; j < candidateMoves.length; j++) {
+      let candidateCoord = addVectors(enemies[i].position, candidateMoves[j]);
+      if (!enemyOnSquare(room, candidateCoord) && posInBounds(candidateCoord)) {
+        room.enemies[i].position = candidateCoord;
+        break;
+      }
+    }
+  }
+}
+
+const enemyOnSquare = (room, coord) => {
+  for (let i = 0; i < room.enemies.length; i++) {
+    if (coordsEqual(room.enemies[i].position, coord)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const getOtherPlayerUsername = (room, username) => {
+  let usernames = Object.keys(room.players);
+  let other = usernames.filter(username_ => username_ !== username);
+  if (other.length > 0) {
+    return other[0];
+  } else {
+    return null;
+  }
+}
+
+const otherPlayerOnSquare = (room, coord, username) => {
+  let otherUsername = getOtherPlayerUsername(room, username);
+  return otherUsername && room.players[otherUsername].alive && coordsEqual(room.players[otherUsername].position, coord);
+}
+
+const killEnemyAt = (room, coord) => {
+  for (let i = 0; i < room.enemies.length; i++) {
+    if (coordsEqual(room.enemies[i].position, coord)) {
+      room.enemies.splice(i, 1);
+      return true;
+    }
+  }
+  return false;
+}
+
+const spawnEnemy = (room) => {
+  let direction;
+  let spawnCoord;
+  let location;
+  let giveUpCount = (BOARD_WIDTH - 1) * 4;
+  do {
+    location = Math.floor(Math.random() * (BOARD_WIDTH - 1) * 4);
+    if (location < (BOARD_WIDTH - 1)) {
+      spawnCoord = [location, 0];
+      direction = UP;
+    } else if (location < 2 * (BOARD_WIDTH - 1)) {
+      spawnCoord = [0, location % (BOARD_WIDTH - 1) + 1];
+      direction = RIGHT;
+    } else if (location < 3 * (BOARD_WIDTH - 1)) {
+      spawnCoord = [location % (BOARD_WIDTH - 1) + 1, 8];
+      direction = DOWN;
+    } else {
+      spawnCoord = [8, location % (BOARD_WIDTH - 1)];
+      direction = LEFT;
+    }
+    giveUpCount--;
+  } while ((enemyOnSquare(room, spawnCoord) || playersNearby(room, spawnCoord)) && giveUpCount > 0);
+  // Only add enemy if we didn't give up
+  if (giveUpCount > 0) {
+    room.enemies.push({
+      id: room.enemy_index,
+      position: spawnCoord
+    });
+    room.enemy_index++;
+  }
+}
+
+const playersNearby = (room, coord) => {
+  let usernames = Object.keys(room.players);
+  for (let i = 0; i < usernames.length; i++) {
+    let username = usernames[i]
+    if (distance(room.players[username].position, coord) < 2) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const spawnEnemies = (room) => {
+  let spawn_threshold = room.enemy_spawn_threshold;
+  let rand = Math.random();
+  if (rand > spawn_threshold) {
+    spawnEnemy(room);
+    if (rand > spawn_threshold + 0.2) {
+      spawnEnemy(room);
+    }
+  }
+  if (room.turns % 10 == 0) {
+    room.enemy_spawn_threshold = Math.max(0, spawn_threshold - 0.01);
+  }
+}
 
 const posInBounds = (pos) => {
   return pos[0] >= 0 && pos[0] < BOARD_WIDTH && pos[1] >= 0 && pos[1] < BOARD_WIDTH;
 }
 
+const coordsEqual = (a, b) => {
+  return a[0] == b[0] && a[1] == b[1];
+}
+
+const useBomb = (room, position) => {
+  for (let i = 0; i < ALL_DIRECTIONS.length; i++) {
+    let direction = ALL_DIRECTIONS[i];
+    let coord = addVectors(position, direction);
+    killEnemyAt(room, coord);
+    room.score += 5;
+  }
+}
+
+const shuffleArray = (array) => {
+  for (let i = array.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array
+}
+
 const addVectors = (a, b) => {
   return [a[0] + b[0], a[1] + b[1]];
+}
+
+const subtractVectors = (a, b) => {
+  return [a[0] - b[0], a[1] - b[1]];
+}
+
+const makeOrthogonalUnitVector = (a) => {
+  if (a[0] === 0) {
+    return [0, Math.floor(a[1] / Math.abs(a[1]))];
+  } else {
+    return [Math.floor(a[0] / Math.abs(a[0])), 0];
+  }
 }
 
 const protectRoomData = (room) => {
@@ -55,6 +275,10 @@ const protectRoomData = (room) => {
     delete cleanRoomData.players[username].socket_id;
   });
   return cleanRoomData;
+}
+
+const getAlivePlayers = (room) => {
+  return Object.keys(room.players).filter(username => room.players[username].alive);
 }
 
 const rooms = {}
@@ -102,6 +326,7 @@ io.on("connection", (socket) => {
       color: data.color,
       character: data.character,
       socket_id: socket.id,
+      alive: true,
     };
     if (rooms.hasOwnProperty(data.room_id)) {
       let room = rooms[data.room_id];
@@ -122,6 +347,8 @@ io.on("connection", (socket) => {
         bombs: [],
         nukes: [],
         blocked: [],
+        enemy_spawn_threshold: 0.55,
+        enemy_index: 0,
         turns: 0,
         bombs: 3,
         id_to_username: {},
@@ -148,19 +375,48 @@ io.on("connection", (socket) => {
       let username = room.id_to_username[socket.id];
       // Not your turn, buddy
       if (room.order[room.whose_turn] !== username) {
-        return
+        return;
       }
       let position = room.players[username].position;
-      let direction = KEY_TO_DIRECTION[key];
-      let proposed_pos = addVectors(position, direction);
-      if (posInBounds(proposed_pos)) {
-        room.players[username].position = proposed_pos;
+      let direction;
+      if (key === 'r') {
+        if (room.bombs <= 0) {
+          return;
+        } else {
+          useBomb(room, position);
+          room.bombs -= 1;
+          direction = [0, 0];
+        }
+      } else {
+        direction = KEY_TO_DIRECTION[key];
+        let proposed_pos = addVectors(position, direction);
+        if (posInBounds(proposed_pos)) {
+          if (enemyOnSquare(room, proposed_pos)) {
+            killEnemyAt(room, proposed_pos);
+            room.score += 10;
+          } else {
+            // Kill your friend :(
+            if (!otherPlayerOnSquare(room, proposed_pos, username)) {
+              room.players[username].position = proposed_pos;
+              room.score += 50;
+            } else {
+              room.players[getOtherPlayerUsername(room, username)].alive = false;
+              room.order = getAlivePlayers(room);
+            }
+          }
+        }
       }
-      if (room.whose_turn === room.order.length - 1) {
-        room.score += 1
-        // Move enemies
+      if (room.whose_turn >= room.order.length - 1) {
+        moveEnemies(room);
+        room.score++;
+        room.turns++;
+        spawnEnemies(room);
       }
-      room.whose_turn = (room.whose_turn + 1) % room.order.length;
+      if (room.order.length === 0) {
+        console.log('game over');
+      } else {
+        room.whose_turn = (room.whose_turn + 1) % room.order.length;
+      }
       let returnData = {
         ...protectRoomData(room),
         keyPressed: key,
