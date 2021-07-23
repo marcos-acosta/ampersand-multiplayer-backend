@@ -25,7 +25,7 @@ const sendStartInfo = async (emitter, room_id) => {
   let game_data = {
     ...rooms[room_id]
   }
-  delete game_data.socket_to_idx
+  delete game_data.id_to_username
   await emitter.to(room_id).emit("start_info", game_data);
 };
 
@@ -48,6 +48,7 @@ const ALL_DIRECTIONS = [UP, RIGHT, DOWN, LEFT, UP_RIGHT, UP_LEFT, DOWN_LEFT, DOW
 const START_POINT_P1 = [4, 4];
 const START_POINT_P2 = [5, 4];
 const BOMB_THRESHOLD = 0.92;
+const REVIVER_THRESHOLD = 0.98;
 const rooms = {}
 
 const distance = (coord_1, coord_2) => {
@@ -210,6 +211,14 @@ const collectBombAt = (room, coord) => {
   return false;
 }
 
+const collectReviverAt = (room, coord) => {
+  if (room.reviver_position && coordsEqual(room.reviver_position, coord)) {
+    room.reviver_position = null;
+    return true;
+  }
+  return false;
+}
+
 const spawnEnemy = (room) => {
   let direction;
   let spawnCoord;
@@ -231,10 +240,7 @@ const spawnEnemy = (room) => {
       direction = LEFT;
     }
     giveUpCount--;
-  } while (
-    (enemyOnSquare(room, spawnCoord) || playersNearby(room, spawnCoord) || bombOnSquare(room, spawnCoord))
-    && giveUpCount > 0
-  );
+  } while ((squareOccupied(room, spawnCoord) || playersNearby(room, spawnCoord)) && giveUpCount > 0);
   // Only add enemy if we didn't give up
   if (giveUpCount > 0) {
     room.enemies.push({
@@ -268,7 +274,7 @@ const spawnEnemies = (room) => {
     }
   }
   if (room.turns % 10 == 0) {
-    room.enemy_spawn_threshold = Math.max(0, spawn_threshold - 0.01);
+    room.enemy_spawn_threshold = Math.max(0, spawn_threshold - 0.02);
   }
 }
 
@@ -282,7 +288,7 @@ const spawnBomb = (room) => {
     let rand = Math.floor(Math.random() * (BOARD_WIDTH ** 2));
     location = [Math.floor(rand / BOARD_WIDTH), rand % BOARD_WIDTH];
     giveUpCount--;
-  } while ((livingPlayerOrEnemyOnSquare(room, location) || bombOnSquare(room, location)) && giveUpCount > 0);
+  } while (squareOccupied(room, location) && giveUpCount > 0);
   if (giveUpCount > 0) {
     room.bombs.push({
       id: room.bomb_index,
@@ -290,6 +296,28 @@ const spawnBomb = (room) => {
     });
     room.bomb_index++;
   }
+}
+
+const spawnReviver = (room) => {
+  if (Math.random() <= REVIVER_THRESHOLD) {
+    return
+  }
+  let giveUpCount = BOARD_WIDTH ** 2;
+  let location;
+  do {
+    let rand = Math.floor(Math.random() * (BOARD_WIDTH ** 2));
+    location = [Math.floor(rand / BOARD_WIDTH), rand % BOARD_WIDTH];
+    giveUpCount--;
+  } while (squareOccupied(room, location) && giveUpCount > 0);
+  if (giveUpCount > 0) {
+    room.reviver_position = location;
+  }
+}
+
+const squareOccupied = (room, coord) => {
+  return livingPlayerOrEnemyOnSquare(room, coord) || 
+    bombOnSquare(room, coord) || 
+    (room.reviver_position && coordsEqual(coord, room.reviver_position));
 }
 
 const posInBounds = (pos) => {
@@ -331,6 +359,23 @@ const makeOrthogonalUnitVector = (a) => {
   } else {
     return [Math.floor(a[0] / Math.abs(a[0])), 0];
   }
+}
+
+const reviveFriend = (room) => {
+  let deadFriendUsername = Object.keys(room.players).find(username =>
+    !room.players[username].alive
+  );
+  let location;
+  // TODO: if there's no square to spawn on, wait?
+  do {
+    let rand = Math.floor(Math.random() * (BOARD_WIDTH ** 2));
+    location = [Math.floor(rand / BOARD_WIDTH), rand % BOARD_WIDTH];
+  } while (squareOccupied(room, location));
+  room.players[deadFriendUsername].alive = true;
+  room.players[deadFriendUsername].position = location;
+  room.order.unshift(deadFriendUsername);
+  room.whose_turn = 1;
+  // console.log(room);
 }
 
 const protectRoomData = (room) => {
@@ -405,7 +450,7 @@ io.on("connection", (socket) => {
         // slice() returns a copy
         player.position = START_POINT_P2.slice();
         room.players[data.username] = player;
-        room.id_to_username[  socket.id] = data.username;
+        room.id_to_username[socket.id] = data.username;
         room.order.push(data.username);
         socket.join(data.room_id);
       }
@@ -416,7 +461,7 @@ io.on("connection", (socket) => {
         bombs: [],
         nukes: [],
         blocked: [],
-        enemy_spawn_threshold: 0.65,
+        enemy_spawn_threshold: 0.5,
         enemy_index: 0,
         bomb_index: 0,
         turns: 0,
@@ -425,6 +470,8 @@ io.on("connection", (socket) => {
         order: [data.username],
         whose_turn: -1,
         score: 0,
+        streak: 0,
+        reviver_position: null
       }
       player.position = START_POINT_P1.slice();
       rooms[data.room_id].players[data.username] = player;
@@ -440,6 +487,7 @@ io.on("connection", (socket) => {
 
   socket.on("keypress", (data) => {
     let room_id = data.room_id, key = data.key;
+    let revived_friend = false;
     // Generic catch-all so the server doesn't crash
     try {
       let room = rooms[room_id]
@@ -465,21 +513,28 @@ io.on("connection", (socket) => {
         direction = KEY_TO_DIRECTION[key];
         let proposed_pos = addVectors(position, direction);
         if (posInBounds(proposed_pos)) {
+          // Attack enemy
           if (enemyOnSquare(room, proposed_pos)) {
             killEnemyAt(room, proposed_pos);
-            room.score += 10;
+            room.streak += 1;
+            room.score += 10 * room.streak;
           } else {
+            room.streak = 0;
             if (!otherPlayerOnSquare(room, proposed_pos, username)) {
-              let collectedBomb = collectBombAt(room, proposed_pos);
-              if (collectedBomb) {
+              if (collectBombAt(room, proposed_pos)) {
                 room.num_bombs++;
+              }
+              if (collectReviverAt(room, proposed_pos)) {
+                reviveFriend(room);
+                revived_friend = true;
+                room.score += 50;
               }
               room.players[username].position = proposed_pos;
             }
-            // Kill your friend
+            // Kill your friend :(
             else {
               killPlayer(room, getOtherPlayerUsername(room, username));
-              // Life insurance
+              // Life insurance :)
               room.score += 50;
             }
           }
@@ -491,6 +546,9 @@ io.on("connection", (socket) => {
         room.score++;
         room.turns++;
         spawnEnemies(room);
+        if (room.order.length < 2 && !room.reviver_position) {
+          spawnReviver(room);
+        }
         spawnBomb(room);
       }
       if (room.order.length === 0) {
@@ -502,7 +560,8 @@ io.on("connection", (socket) => {
         ...protectRoomData(room),
         keyPressed: key,
         direction: direction,
-        playerMoved: username
+        playerMoved: username,
+        revivedFriend: revived_friend
       };
       io.to(room_id).emit("game_update", returnData);
     } catch (e) {
