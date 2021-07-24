@@ -47,9 +47,16 @@ const DOWN_RIGHT = [1, -1];
 const ALL_DIRECTIONS = [UP, RIGHT, DOWN, LEFT, UP_RIGHT, UP_LEFT, DOWN_LEFT, DOWN_RIGHT];
 const START_POINT_P1 = [4, 4];
 const START_POINT_P2 = [5, 4];
-const BOMB_THRESHOLD = 0.9;
+const MAX_BOMB_THRESHOLD = 0.98;
+const INITIAL_BOMB_THRESHOLD = 0.7;
+const BOMB_THRESHOLD_TIME_CONSTANT = 0.7;
 const REVIVER_THRESHOLD = 0.8;
+const ENEMY_INCREASE_RATE = 0.0275
 const rooms = {}
+
+const getBombThreshold = (room) => {
+  return MAX_BOMB_THRESHOLD - (MAX_BOMB_THRESHOLD - INITIAL_BOMB_THRESHOLD) * Math.exp(-BOMB_THRESHOLD_TIME_CONSTANT * room.bombs.length);
+}
 
 const distance = (coord_1, coord_2) => {
   return Math.sqrt(Math.pow(coord_1[0] - coord_2[0], 2) + Math.pow(coord_1[1] - coord_2[1], 2));
@@ -275,12 +282,12 @@ const spawnEnemies = (room) => {
     }
   }
   if (room.turns % 10 == 0) {
-    room.enemy_spawn_threshold = Math.max(0, spawn_threshold - 0.025);
+    room.enemy_spawn_threshold = Math.max(0, spawn_threshold - ENEMY_INCREASE_RATE);
   }
 }
 
 const spawnBomb = (room) => {
-  if (Math.random() <= BOMB_THRESHOLD) {
+  if (Math.random() <= getBombThreshold(room)) {
     return
   }
   let giveUpCount = BOARD_WIDTH ** 2;
@@ -376,24 +383,41 @@ const unwillinglyDonateBombs = (room, username, isKiller) => {
   room.players[deceasedUsername].num_bombs = 0;
 }
 
-const reviveFriend = (room) => {
+const enemyNearby = (room, coord) => {
+  for (let i = 0; i < ALL_DIRECTIONS.length; i++) {
+    if (enemyOnSquare(room, addVectors(coord, ALL_DIRECTIONS[i]))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const reviveFriend = (room, livingPlayerUsername) => {
   let deadFriendUsername = Object.keys(room.players).find(username =>
     !room.players[username].alive
   );
   let location;
   // TODO: if there's no square to spawn on, wait?
+  let circuit_breaker = BOARD_WIDTH ** 2;
   do {
     let rand = Math.floor(Math.random() * (BOARD_WIDTH ** 2));
     location = [Math.floor(rand / BOARD_WIDTH), rand % BOARD_WIDTH];
-  } while (squareOccupied(room, location));
+    circuit_breaker--;
+  } while (squareOccupied(room, location) || (enemyNearby(room, location) && circuit_breaker > 0));
+  // Revive
   room.players[deadFriendUsername].alive = true;
   room.players[deadFriendUsername].position = location;
-  console.log(room.players[deadFriendUsername]);
+  // Add back to playing order
   room.order.push(deadFriendUsername);
-  console.log(room.order);
+  // Set turn to friend so next comes revived player
   room.whose_turn = 0;
-  console.log(room.whose_turn);
+  // No more easy mode
   room.enemy_spawn_threshold -= 0.25;
+  // Living player gives revived player a bomb, if they'll have one to spare
+  if (room.players[livingPlayerUsername].num_bombs > 1) {
+    room.players[livingPlayerUsername].num_bombs--;
+    room.players[deadFriendUsername].num_bombs++;
+  }
 }
 
 const protectRoomData = (room) => {
@@ -414,6 +438,7 @@ const getAlivePlayers = (room) => {
 
 const killPlayer = (room, username) => {
   room.players[username].alive = false;
+  room.players[username].deaths++;
   room.order = getAlivePlayers(room);
   room.enemy_spawn_threshold += 0.25;
 }
@@ -452,8 +477,6 @@ app.post('/uniquely_identifying', (req, res) => {
 });
 
 io.on("connection", (socket) => {
-  // console.log('connect!');
-  // console.log(io.sockets.sockets.keys());
   socket.on("join_room", (data) => {
     let player = {
       color: data.color,
@@ -461,6 +484,9 @@ io.on("connection", (socket) => {
       socket_id: socket.id,
       alive: true,
       num_bombs: 2,
+      deaths: 0,
+      hits: 0,
+      bombs_collected: 0
     };
     if (rooms.hasOwnProperty(data.room_id)) {
       let room = rooms[data.room_id];
@@ -501,7 +527,6 @@ io.on("connection", (socket) => {
       rooms[data.room_id].whose_turn = 0;
       sendStartInfo(io, data.room_id);
     }
-    // console.log(rooms);
   });
 
   socket.on("keypress", (data) => {
@@ -537,14 +562,16 @@ io.on("connection", (socket) => {
             killEnemyAt(room, proposed_pos);
             room.streak += 1;
             room.score += 10 * room.streak;
+            room.players[username].hits++;
           } else {
             room.streak = 0;
             if (!otherPlayerOnSquare(room, proposed_pos, username)) {
               if (collectBombAt(room, proposed_pos)) {
                 room.players[username].num_bombs++;
+                room.players[username].bombs_collected++;
               }
               if (collectReviverAt(room, proposed_pos)) {
-                reviveFriend(room);
+                reviveFriend(room, username);
                 revived_friend = true;
                 room.score += 50;
               }
@@ -603,8 +630,5 @@ io.on("connection", (socket) => {
         room.order.splice(indexInOrder, 1);
       }
     }
-    // console.log(rooms);
-    // console.log('disconnect!');
-    // console.log(io.sockets.sockets.keys());
   });
 })
