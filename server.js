@@ -47,8 +47,8 @@ const DOWN_RIGHT = [1, -1];
 const ALL_DIRECTIONS = [UP, RIGHT, DOWN, LEFT, UP_RIGHT, UP_LEFT, DOWN_LEFT, DOWN_RIGHT];
 const START_POINT_P1 = [4, 4];
 const START_POINT_P2 = [5, 4];
-const BOMB_THRESHOLD = 0.92;
-const REVIVER_THRESHOLD = 0.98;
+const BOMB_THRESHOLD = 0.9;
+const REVIVER_THRESHOLD = 0.8;
 const rooms = {}
 
 const distance = (coord_1, coord_2) => {
@@ -135,6 +135,7 @@ const moveEnemies = (room) => {
         let playerAttacked = livingPlayerOnSquare(room, candidateCoord);
         if (playerAttacked) {
           killPlayer(room, playerAttacked);
+          unwillinglyDonateBombs(room, playerAttacked, false);
         }
         room.enemies[i].position = candidateCoord;
         break;
@@ -269,12 +270,12 @@ const spawnEnemies = (room) => {
   let rand = Math.random();
   if (rand > spawn_threshold) {
     spawnEnemy(room);
-    if (rand > spawn_threshold + 0.2) {
+    if (rand > (spawn_threshold + 1) / 2) {
       spawnEnemy(room);
     }
   }
   if (room.turns % 10 == 0) {
-    room.enemy_spawn_threshold = Math.max(0, spawn_threshold - 0.02);
+    room.enemy_spawn_threshold = Math.max(0, spawn_threshold - 0.025);
   }
 }
 
@@ -361,6 +362,20 @@ const makeOrthogonalUnitVector = (a) => {
   }
 }
 
+const unwillinglyDonateBombs = (room, username, isKiller) => {
+  let deceasedUsername;
+  let otherUsername;
+  if (isKiller) {
+    deceasedUsername = getOtherPlayerUsername(room, username);
+    otherUsername = username;
+  } else {
+    deceasedUsername = username;
+    otherUsername = getOtherPlayerUsername(room, username);
+  }
+  room.players[otherUsername].num_bombs += room.players[deceasedUsername].num_bombs;
+  room.players[deceasedUsername].num_bombs = 0;
+}
+
 const reviveFriend = (room) => {
   let deadFriendUsername = Object.keys(room.players).find(username =>
     !room.players[username].alive
@@ -373,9 +388,12 @@ const reviveFriend = (room) => {
   } while (squareOccupied(room, location));
   room.players[deadFriendUsername].alive = true;
   room.players[deadFriendUsername].position = location;
-  room.order.unshift(deadFriendUsername);
-  room.whose_turn = 1;
-  // console.log(room);
+  console.log(room.players[deadFriendUsername]);
+  room.order.push(deadFriendUsername);
+  console.log(room.order);
+  room.whose_turn = 0;
+  console.log(room.whose_turn);
+  room.enemy_spawn_threshold -= 0.25;
 }
 
 const protectRoomData = (room) => {
@@ -397,6 +415,7 @@ const getAlivePlayers = (room) => {
 const killPlayer = (room, username) => {
   room.players[username].alive = false;
   room.order = getAlivePlayers(room);
+  room.enemy_spawn_threshold += 0.25;
 }
 
 app.get('/', (req, res) => {
@@ -441,6 +460,7 @@ io.on("connection", (socket) => {
       character: data.character,
       socket_id: socket.id,
       alive: true,
+      num_bombs: 2,
     };
     if (rooms.hasOwnProperty(data.room_id)) {
       let room = rooms[data.room_id];
@@ -465,7 +485,6 @@ io.on("connection", (socket) => {
         enemy_index: 0,
         bomb_index: 0,
         turns: 0,
-        num_bombs: 3,
         id_to_username: {},
         order: [data.username],
         whose_turn: -1,
@@ -500,11 +519,11 @@ io.on("connection", (socket) => {
       let direction;
       // Use bomb
       if (key === 'r') {
-        if (room.num_bombs <= 0) {
+        if (room.players[username].num_bombs <= 0) {
           return;
         } else {
           useBomb(room, position);
-          room.num_bombs -= 1;
+          room.players[username].num_bombs -= 1;
           direction = [0, 0];
         }
       }
@@ -522,7 +541,7 @@ io.on("connection", (socket) => {
             room.streak = 0;
             if (!otherPlayerOnSquare(room, proposed_pos, username)) {
               if (collectBombAt(room, proposed_pos)) {
-                room.num_bombs++;
+                room.players[username].num_bombs++;
               }
               if (collectReviverAt(room, proposed_pos)) {
                 reviveFriend(room);
@@ -534,8 +553,8 @@ io.on("connection", (socket) => {
             // Kill your friend :(
             else {
               killPlayer(room, getOtherPlayerUsername(room, username));
-              // Life insurance :)
-              room.score += 50;
+              room.score -= 50;
+              unwillinglyDonateBombs(room, username, true);
             }
           }
         }
