@@ -16,8 +16,8 @@ const server = app.listen(port, () => {
 const io = socketIO(server, {
   cors: {
     credentials: true,
-    origin: "http://localhost:3000"
-    // origin: "https://ampersand-mp.netlify.app"
+    // origin: "http://localhost:3000"
+    origin: "https://ampersand-mp.netlify.app"
   }
 });
 
