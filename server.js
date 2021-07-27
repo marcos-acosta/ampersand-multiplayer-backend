@@ -671,6 +671,8 @@ io.on("connection", (socket) => {
               unwillinglyDonateBombs(room, username, true);
             }
           }
+        } else {
+          room.streak = 0;
         }
       }
       // One complete "round" => move enemies
