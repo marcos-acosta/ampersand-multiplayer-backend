@@ -51,8 +51,10 @@ const MAX_BOMB_THRESHOLD = 0.98;
 const INITIAL_BOMB_THRESHOLD = 0.7;
 const BOMB_THRESHOLD_TIME_CONSTANT = 0.7;
 const REVIVER_THRESHOLD = 0.8;
-const ENEMY_INCREASE_RATE = 0.0275
-const rooms = {}
+const ENEMY_INCREASE_RATE = 0.0275;
+const NUKE_SPAWN_THRESHOLD = 0.8;
+const rooms = {};
+const validKeys = new Set(['w', 'a', 's', 'd', 'r']);
 
 const getBombThreshold = (room) => {
   return MAX_BOMB_THRESHOLD - (MAX_BOMB_THRESHOLD - INITIAL_BOMB_THRESHOLD) * Math.exp(-BOMB_THRESHOLD_TIME_CONSTANT * room.bombs.length);
@@ -227,7 +229,15 @@ const collectReviverAt = (room, coord) => {
   return false;
 }
 
-const spawnEnemy = (room) => {
+const collectNukeAt = (room, coord) => {
+  if (room.nuke_position && coordsEqual(room.nuke_position, coord)) {
+    room.nuke_position = null;
+    return true;
+  }
+  return false;
+}
+
+const getValidSpawnCoord = (room) => {
   let direction;
   let spawnCoord;
   let location;
@@ -249,13 +259,23 @@ const spawnEnemy = (room) => {
     }
     giveUpCount--;
   } while ((squareOccupied(room, spawnCoord) || playersNearby(room, spawnCoord)) && giveUpCount > 0);
-  // Only add enemy if we didn't give up
   if (giveUpCount > 0) {
-    room.enemies.push({
-      id: room.enemy_index,
+    return {
       position: spawnCoord,
-      new: true,
       spawnDirection: direction
+    }
+  } else {
+    return false;
+  }
+}
+
+const spawnEnemy = (room) => {
+  let spawnData = getValidSpawnCoord(room);
+  if (spawnData) {
+    room.enemies.push({
+      ...spawnData,
+      new: true,
+      id: room.enemy_index
     });
     room.enemy_index++;
   }
@@ -288,7 +308,7 @@ const spawnEnemies = (room) => {
 
 const spawnBomb = (room) => {
   if (Math.random() <= getBombThreshold(room)) {
-    return
+    return;
   }
   let giveUpCount = BOARD_WIDTH ** 2;
   let location;
@@ -303,6 +323,22 @@ const spawnBomb = (room) => {
       position: location,
     });
     room.bomb_index++;
+  }
+}
+
+const spawnNuke = (room) => {
+  if (room.nuke_position || room.enemies.length <= 10 || Math.random() <= NUKE_SPAWN_THRESHOLD) {
+    return;
+  }
+  let giveUpCount = BOARD_WIDTH ** 2;
+  let location;
+  do {
+    let rand = Math.floor(Math.random() * (BOARD_WIDTH ** 2));
+    location = [Math.floor(rand / BOARD_WIDTH), rand % BOARD_WIDTH];
+    giveUpCount--;
+  } while (squareOccupied(room, location) && giveUpCount > 0);
+  if (giveUpCount > 0) {
+    room.nuke_position = location;
   }
 }
 
@@ -325,7 +361,8 @@ const spawnReviver = (room) => {
 const squareOccupied = (room, coord) => {
   return livingPlayerOrEnemyOnSquare(room, coord) || 
     bombOnSquare(room, coord) || 
-    (room.reviver_position && coordsEqual(coord, room.reviver_position));
+    (room.reviver_position && coordsEqual(coord, room.reviver_position)) ||
+    (room.nuke_position && coordsEqual(coord, room.nuke_position));
 }
 
 const posInBounds = (pos) => {
@@ -392,6 +429,10 @@ const enemyNearby = (room, coord) => {
   return false;
 }
 
+const areOdd = (coord_1, coord_2) => {
+  return (coord_1[0] + coord_1[1] + coord_2[0] + coord_2[1]) % 2 === 0;
+}
+
 const reviveFriend = (room, livingPlayerUsername) => {
   let deadFriendUsername = Object.keys(room.players).find(username =>
     !room.players[username].alive
@@ -441,6 +482,37 @@ const killPlayer = (room, username) => {
   room.players[username].deaths++;
   room.order = getAlivePlayers(room);
   room.enemy_spawn_threshold += 0.25;
+}
+
+const resetRoom = (room) => {
+  room.enemies = [];
+  room.bombs = [];
+  room.blocked = [];
+  room.enemy_spawn_threshold = 0.5;
+  room.enemy_index = 0;
+  room.bomb_index = 0;
+  room.turns = 0;
+  room.order = shuffleArray(Object.keys(room.players));
+  room.whose_turn = 0;
+  room.score = 0;
+  room.streak = 0;
+  room.reviver_position = null;
+  room.game_state = "normal";
+  room.nuke_position = null;
+  let usernames = Object.keys(room.players);
+  for (let i = 0; i < usernames.length; i++) {
+    let player = room.players[usernames[i]];
+    player.alive = true;
+    player.num_bombs = 2;
+    player.deaths = 0;
+    player.hits = 0;
+    player.bombs_collected = 0;
+    if (i == 0) {
+      player.position = START_POINT_P1.slice();
+    } else {
+      player.position = START_POINT_P2.slice();
+    }
+  }
 }
 
 app.get('/', (req, res) => {
@@ -505,7 +577,6 @@ io.on("connection", (socket) => {
         players: {},
         enemies: [],
         bombs: [],
-        nukes: [],
         blocked: [],
         enemy_spawn_threshold: 0.5,
         enemy_index: 0,
@@ -516,7 +587,9 @@ io.on("connection", (socket) => {
         whose_turn: -1,
         score: 0,
         streak: 0,
-        reviver_position: null
+        reviver_position: null,
+        game_state: "normal",
+        nuke_position: null
       }
       player.position = START_POINT_P1.slice();
       rooms[data.room_id].players[data.username] = player;
@@ -534,7 +607,15 @@ io.on("connection", (socket) => {
     let revived_friend = false;
     // Generic catch-all so the server doesn't crash
     try {
-      let room = rooms[room_id]
+      let room = rooms[room_id];
+      if (room.game_state === 'game_over') {
+        resetRoom(room);
+        io.emit("room_reset", protectRoomData(room));
+        return;
+      }
+      if (!validKeys.has(key)) {
+        return;
+      }
       let username = room.id_to_username[socket.id];
       // Not your turn, buddy
       if (room.order[room.whose_turn] !== username) {
@@ -575,6 +656,10 @@ io.on("connection", (socket) => {
                 revived_friend = true;
                 room.score += 50;
               }
+              if (collectNukeAt(room, proposed_pos)) {
+                room.enemies = [];
+                room.score += 50;
+              }
               room.players[username].position = proposed_pos;
             }
             // Kill your friend :(
@@ -595,10 +680,11 @@ io.on("connection", (socket) => {
         if (room.order.length < 2 && !room.reviver_position) {
           spawnReviver(room);
         }
+        spawnNuke(room);
         spawnBomb(room);
       }
       if (room.order.length === 0) {
-        console.log('game over');
+        room.game_state = "game_over";
       } else {
         room.whose_turn = (room.whose_turn + 1) % room.order.length;
       }
