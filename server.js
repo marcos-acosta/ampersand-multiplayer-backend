@@ -16,8 +16,8 @@ const server = app.listen(port, () => {
 const io = socketIO(server, {
   cors: {
     credentials: true,
-    // origin: "http://localhost:3000"
-    origin: "https://ampersand-mp.netlify.app"
+    origin: "http://localhost:3000"
+    // origin: "https://ampersand-mp.netlify.app"
   }
 });
 
@@ -609,8 +609,10 @@ io.on("connection", (socket) => {
     try {
       let room = rooms[room_id];
       if (room.game_state === 'game_over') {
-        resetRoom(room);
-        io.emit("room_reset", protectRoomData(room));
+        if (key === 'Enter') {
+          resetRoom(room);
+          io.emit("room_reset", protectRoomData(room));
+        }
         return;
       }
       if (!validKeys.has(key)) {
@@ -642,7 +644,7 @@ io.on("connection", (socket) => {
           if (enemyOnSquare(room, proposed_pos)) {
             killEnemyAt(room, proposed_pos);
             room.streak += 1;
-            room.score += 10 * room.streak;
+            room.score += 10 + 5 * (room.streak - 1);
             room.players[username].hits++;
           } else {
             room.streak = 0;
