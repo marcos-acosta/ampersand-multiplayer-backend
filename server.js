@@ -531,9 +531,9 @@ app.post('/uniquely_identifying', (req, res) => {
     res.send({unique: true, reasons: []});
   } else {
     let players = rooms[req.body.room_id].players;
-    let player_one = players[Object.keys(players)[0]];
-    let username_unique = req.body.username !== player_one.username;
-    let appearance_unique = req.body.color !== player_one.color || req.body.character !== player_one.character;
+    let player_one = Object.keys(players)[0];
+    let username_unique = req.body.username !== player_one;
+    let appearance_unique = req.body.color !== players[player_one].color || req.body.character !== players[player_one].character;
     let reasons = [];
     if (!username_unique) {
       reasons.push("username");
