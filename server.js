@@ -49,12 +49,12 @@ const START_POINT_P1 = [4, 4];
 const START_POINT_P2 = [5, 4];
 const MAX_BOMB_THRESHOLD = 0.98;
 const INITIAL_BOMB_THRESHOLD = 0.7;
-const BOMB_THRESHOLD_TIME_CONSTANT = 0.7;
+const BOMB_THRESHOLD_TIME_CONSTANT = 0.6;
 const REVIVER_THRESHOLD = 0.8;
 const ENEMY_INCREASE_RATE = 0.0275;
-const NUKE_SPAWN_THRESHOLD = 0.8;
+const NUKE_SPAWN_THRESHOLD = 0.9;
 const rooms = {};
-const validKeys = new Set(['w', 'a', 's', 'd', 'r']);
+const validKeys = new Set(['w', 'a', 's', 'd', ' ']);
 
 const getBombThreshold = (room) => {
   return MAX_BOMB_THRESHOLD - (MAX_BOMB_THRESHOLD - INITIAL_BOMB_THRESHOLD) * Math.exp(-BOMB_THRESHOLD_TIME_CONSTANT * room.bombs.length);
@@ -327,7 +327,7 @@ const spawnBomb = (room) => {
 }
 
 const spawnNuke = (room) => {
-  if (room.nuke_position || room.enemies.length <= 10 || Math.random() <= NUKE_SPAWN_THRESHOLD) {
+  if (room.nuke_position || room.enemies.length <= 12 || Math.random() <= NUKE_SPAWN_THRESHOLD) {
     return;
   }
   let giveUpCount = BOARD_WIDTH ** 2;
@@ -377,8 +377,9 @@ const useBomb = (room, position) => {
   for (let i = 0; i < ALL_DIRECTIONS.length; i++) {
     let direction = ALL_DIRECTIONS[i];
     let coord = addVectors(position, direction);
-    killEnemyAt(room, coord);
-    room.score += 5;
+    if (killEnemyAt(room, coord)) {
+      room.score += 5;
+    }
   }
 }
 
@@ -427,10 +428,6 @@ const enemyNearby = (room, coord) => {
     }
   }
   return false;
-}
-
-const areOdd = (coord_1, coord_2) => {
-  return (coord_1[0] + coord_1[1] + coord_2[0] + coord_2[1]) % 2 === 0;
 }
 
 const reviveFriend = (room, livingPlayerUsername) => {
@@ -626,7 +623,7 @@ io.on("connection", (socket) => {
       let position = room.players[username].position;
       let direction;
       // Use bomb
-      if (key === 'r') {
+      if (key === ' ') {
         if (room.players[username].num_bombs <= 0) {
           return;
         } else {
@@ -649,10 +646,7 @@ io.on("connection", (socket) => {
           } else {
             room.streak = 0;
             if (!otherPlayerOnSquare(room, proposed_pos, username)) {
-              if (collectBombAt(room, proposed_pos)) {
-                room.players[username].num_bombs++;
-                room.players[username].bombs_collected++;
-              }
+              room.players[username].position = proposed_pos;
               if (collectReviverAt(room, proposed_pos)) {
                 reviveFriend(room, username);
                 revived_friend = true;
@@ -662,7 +656,10 @@ io.on("connection", (socket) => {
                 room.enemies = [];
                 room.score += 50;
               }
-              room.players[username].position = proposed_pos;
+              if (collectBombAt(room, proposed_pos)) {
+                room.players[username].num_bombs++;
+                room.players[username].bombs_collected++;
+              }
             }
             // Kill your friend :(
             else {
