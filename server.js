@@ -146,6 +146,7 @@ const BOMB_THRESHOLD_TIME_CONSTANT = 0.6;
 const REVIVER_THRESHOLD = 0.8;
 const ENEMY_INCREASE_RATE = 0.0275;
 const NUKE_SPAWN_THRESHOLD = 0.9;
+const SPAWN_RATE_THROTTLE = 0.25;
 const rooms = {};
 const validKeys = new Set(['w', 'a', 's', 'd', ' ']);
 
@@ -543,7 +544,7 @@ const reviveFriend = (room, livingPlayerUsername) => {
   // Set turn to friend so next comes revived player
   room.whose_turn = 0;
   // No more easy mode
-  room.enemy_spawn_threshold -= 0.25;
+  room.enemy_spawn_threshold -= SPAWN_RATE_THROTTLE;
   // Living player gives revived player a bomb, if they'll have one to spare
   if (room.players[livingPlayerUsername].num_bombs > 1) {
     room.players[livingPlayerUsername].num_bombs--;
@@ -571,7 +572,7 @@ const killPlayer = (room, username) => {
   room.players[username].alive = false;
   room.players[username].deaths++;
   room.order = getAlivePlayers(room);
-  room.enemy_spawn_threshold += 0.25;
+  room.enemy_spawn_threshold += SPAWN_RATE_THROTTLE;
 }
 
 const resetRoom = (room) => {
