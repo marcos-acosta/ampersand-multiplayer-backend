@@ -1,6 +1,12 @@
 const express = require("express");
 const socketIO = require("socket.io");
 const cors = require("cors");
+const dotenv = require("dotenv");
+const { MongoClient } = require("mongodb");
+
+dotenv.config();
+
+const LEADERBOARD_LIMIT = 5;
 
 const app = express();
 
@@ -8,9 +14,96 @@ app.use(cors());
 app.use(express.json());
 
 const port = process.env.PORT || 4000;
+const MONGODB_URI = `mongodb+srv://${process.env.MONGO_USERNAME}:${process.env.MONGO_PASSWORD}@${process.env.MONGO_DATABASE}`;
+const client = new MongoClient(MONGODB_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true
+});
 
 const server = app.listen(port, () => {
   console.log(`Listening on port ${port}`);
+});
+
+app.get('/', (req, res) => {
+  res.send("GENERAL KENOBI: Hello there.")
+});
+
+app.get('/multiplayer/high_scores/', async (req, res) => {
+  await client.connect();
+  client.db('ampersand').collection('multiplayer').find().toArray()
+    .then(scores => res.json(scores))
+    .catch(err => res.status(400).json(`ERR: ${err}`))
+    .finally(async () => {
+      await client.close()
+    });
+});
+
+app.post('/multiplayer/add_score/', async(req, res) => {
+  await client.connect();
+  let db = client.db('ampersand').collection('multiplayer');
+  db.find().toArray()
+    .then(async (scores) => {
+      let sorted_scores = scores.sort((firstEl, secondEl) => firstEl.score - secondEl.score);
+      // You made it onto the leaderboard!
+      if (sorted_scores.length < LEADERBOARD_LIMIT || req.body.score > sorted_scores[0].score) {
+        // If already at leaderboard limit, drop someone's score
+        if (sorted_scores.length >= LEADERBOARD_LIMIT) {
+          let deleteId = sorted_scores[0]._id;
+          await db.deleteOne({_id: deleteId});
+        }
+        // Add your score
+        db.insertOne(req.body)
+          .then(async result => {
+            await client.close();
+            res.json({
+              ...result, 
+              made_leaderboard: true
+            }
+          )})
+          .catch(async err => {
+            await client.close();
+            res.status(400).json(`ERR: ${err}`)
+          });
+      } else {
+        await client.close();
+        res.json({
+          made_leaderboard: false
+        });
+      }
+    })
+    .catch(async err => {
+      await client.close();
+      res.status(400).json(`ERR: ${err}`)
+    });
+});
+
+app.post('/room_available', (req, res) => {
+  res.send({
+    num_players: rooms.hasOwnProperty(req.body.room_id) ? Object.keys(rooms[req.body.room_id].players).length : 0
+  });
+});
+
+app.post('/uniquely_identifying', (req, res) => {
+  if (!rooms.hasOwnProperty(req.body.room_id)) {
+    // No one in the room, you're unique
+    res.send({unique: true, reasons: []});
+  } else {
+    let players = rooms[req.body.room_id].players;
+    let player_one = Object.keys(players)[0];
+    let username_unique = req.body.username !== player_one;
+    let appearance_unique = req.body.color !== players[player_one].color || req.body.character !== players[player_one].character;
+    let reasons = [];
+    if (!username_unique) {
+      reasons.push("username");
+    }
+    if (!appearance_unique) {
+      reasons.push("appearance");
+    }
+    res.send({
+      unique: username_unique && appearance_unique,
+      reasons: reasons
+    });
+  }
 });
 
 const io = socketIO(server, {
@@ -512,39 +605,6 @@ const resetRoom = (room) => {
   }
 }
 
-app.get('/', (req, res) => {
-  res.send("GENERAL KENOBI: Hello there.")
-})
-
-app.post('/room_available', (req, res) => {
-  res.send({
-    num_players: rooms.hasOwnProperty(req.body.room_id) ? Object.keys(rooms[req.body.room_id].players).length : 0
-  });
-});
-
-app.post('/uniquely_identifying', (req, res) => {
-  if (!rooms.hasOwnProperty(req.body.room_id)) {
-    // No one in the room, you're unique
-    res.send({unique: true, reasons: []});
-  } else {
-    let players = rooms[req.body.room_id].players;
-    let player_one = Object.keys(players)[0];
-    let username_unique = req.body.username !== player_one;
-    let appearance_unique = req.body.color !== players[player_one].color || req.body.character !== players[player_one].character;
-    let reasons = [];
-    if (!username_unique) {
-      reasons.push("username");
-    }
-    if (!appearance_unique) {
-      reasons.push("appearance");
-    }
-    res.send({
-      unique: username_unique && appearance_unique,
-      reasons: reasons
-    });
-  }
-});
-
 io.on("connection", (socket) => {
   socket.on("join_room", (data) => {
     let player = {
@@ -718,4 +778,51 @@ io.on("connection", (socket) => {
       }
     }
   });
+
+  socket.on("send_score", async (room_id) => {
+    let room = rooms[room_id];
+    if (room && Object.keys(room.players).length == 2) {
+      let usernames = Object.keys(room.players);
+      let score_data = {
+        username_1: usernames[0],
+        username_2: usernames[1],
+        score: room.score
+      }
+      let result = await sendScore(score_data);
+      io.to(room_id).emit("leaderboard_ready", result);
+    }
+  });
 })
+
+const sendScore = async (score_data) => {
+  await client.connect();
+  let db = client.db('ampersand').collection('multiplayer');
+  let scores = await db.find().toArray()
+  let sorted_scores = scores.sort((firstEl, secondEl) => secondEl.score - firstEl.score);
+  // You made it onto the leaderboard!
+  if (sorted_scores.length < LEADERBOARD_LIMIT || score_data.score > sorted_scores[sorted_scores.length - 1].score) {
+    // If already at leaderboard limit, drop someone's score
+    if (sorted_scores.length >= LEADERBOARD_LIMIT) {
+      let deleteId = sorted_scores[sorted_scores.length - 1]._id;
+      await db.deleteOne({_id: deleteId});
+    }
+    // Add your score
+    made_leaderboard = true;
+    let insert_result = await db.insertOne(score_data);
+    // Get full list now
+    let scores_new = await db.find().toArray();
+    let sorted_scores_new = scores_new.sort((firstEl, secondEl) => secondEl.score - firstEl.score);
+    await client.close();
+    return {
+      ...insert_result,
+      made_leaderboard: true,
+      leaderboard: sorted_scores_new
+    }
+  } else {
+    await client.close();
+    return {
+      made_leaderboard: false,
+      leaderboard: sorted_scores
+    }
+  }
+}
