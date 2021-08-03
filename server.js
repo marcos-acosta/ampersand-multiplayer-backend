@@ -675,7 +675,7 @@ io.on("connection", (socket) => {
     try {
       let room = singleplayer ? singleplayer_games[socket.id] : rooms[room_id];
       if (room.game_state === 'game_over') {
-        if (key === ' ') {
+        if (KEY_TO_DIRECTION.hasOwnProperty(key)) {
           resetRoom(room, singleplayer);
           if (singleplayer) {
             io.to(socket.id).emit("room_reset", room);
