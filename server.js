@@ -111,8 +111,8 @@ app.post('/uniquely_identifying', (req, res) => {
 const io = socketIO(server, {
   cors: {
     credentials: true,
-    origin: "http://localhost:3000"
-    // origin: "https://ampersand-mp.netlify.app"
+    // origin: "http://localhost:3000"
+    origin: "https://ampersand-mp.netlify.app"
   }
 });
 
