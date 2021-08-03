@@ -28,57 +28,6 @@ app.get('/', (req, res) => {
   res.send("GENERAL KENOBI: Hello there.")
 });
 
-app.get('/multiplayer/high_scores/', async (req, res) => {
-  await client.connect();
-  client.db('ampersand').collection('multiplayer').find().toArray()
-    .then(scores => res.json(scores))
-    .catch(err => res.status(400).json(`ERR: ${err}`))
-    .finally(async () => {
-      await client.close()
-    });
-});
-
-/*
-app.post('/multiplayer/add_score/', async(req, res) => {
-  await client.connect();
-  let db = client.db('ampersand').collection('multiplayer');
-  db.find().toArray()
-    .then(async (scores) => {
-      let sorted_scores = scores.sort((firstEl, secondEl) => firstEl.score - secondEl.score);
-      // You made it onto the leaderboard!
-      if (sorted_scores.length < LEADERBOARD_LIMIT || req.body.score > sorted_scores[0].score) {
-        // If already at leaderboard limit, drop someone's score
-        if (sorted_scores.length >= LEADERBOARD_LIMIT) {
-          let deleteId = sorted_scores[0]._id;
-          await db.deleteOne({_id: deleteId});
-        }
-        // Add your score
-        db.insertOne(req.body)
-          .then(async result => {
-            await client.close();
-            res.json({
-              ...result, 
-              made_leaderboard: true
-            }
-          )})
-          .catch(async err => {
-            await client.close();
-            res.status(400).json(`ERR: ${err}`)
-          });
-      } else {
-        await client.close();
-        res.json({
-          made_leaderboard: false
-        });
-      }
-    })
-    .catch(async err => {
-      await client.close();
-      res.status(400).json(`ERR: ${err}`)
-    });
-});
-*/
-
 app.post('/room_available', (req, res) => {
   res.send({
     num_players: rooms.hasOwnProperty(req.body.room_id) ? Object.keys(rooms[req.body.room_id].players).length : 0
@@ -615,6 +564,7 @@ const resetRoom = (room, singleplayer) => {
   room.streak = 0;
   room.game_state = "normal";
   room.nuke_position = null;
+  room.longest_streak = 0;
   if (singleplayer) {
     let player = room.player;
     player.alive = true;
@@ -667,7 +617,8 @@ io.on("connection", (socket) => {
         streak: 0,
         game_state: "normal",
         nuke_position: null,
-        player: player
+        player: player,
+        longest_streak: 0
       };
       io.to(socket.id).emit("start_info", singleplayer_games[socket.id]);
     } else {
@@ -702,6 +653,7 @@ io.on("connection", (socket) => {
           order: [data.username],
           whose_turn: -1,
           reviver_position: null,
+          longest_streak: 0
         };
         player.position = START_POINT_P1.slice();
         rooms[data.room_id].players[data.username] = player;
@@ -723,7 +675,7 @@ io.on("connection", (socket) => {
     try {
       let room = singleplayer ? singleplayer_games[socket.id] : rooms[room_id];
       if (room.game_state === 'game_over') {
-        if (key === 'Enter') {
+        if (key === ' ') {
           resetRoom(room, singleplayer);
           if (singleplayer) {
             io.to(socket.id).emit("room_reset", room);
@@ -763,6 +715,7 @@ io.on("connection", (socket) => {
           if (enemyOnSquare(room, proposed_pos)) {
             killEnemyAt(room, proposed_pos);
             room.streak += 1;
+            room.longest_streak = Math.max(room.longest_streak, room.streak);
             room.score += 10 + 5 * (room.streak - 1);
             player.hits++;
           } else {
