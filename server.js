@@ -100,7 +100,7 @@ const ENEMY_INCREASE_RATE_S = 0.01;
 const INITIAL_ENEMY_SPAWN_RATE = 0.5;
 const INITIAL_ENEMY_SPAWN_RATE_S = 0.65;
 const NUKE_SPAWN_THRESHOLD = 0.9;
-const SPAWN_RATE_THROTTLE = 0.25;
+const SPAWN_RATE_THROTTLE = 0.175;
 let rooms = {};
 let singleplayer_games = {};
 const validKeys = new Set(['w', 'a', 's', 'd', ' ', 'r']);
@@ -358,10 +358,9 @@ const playersNearby = (room, coord, singleplayer) => {
 
 const spawnEnemies = (room, singleplayer) => {
   let spawn_threshold = room.enemy_spawn_threshold;
-  let rand = Math.random();
-  if (rand > spawn_threshold) {
+  if (Math.random() > spawn_threshold) {
     spawnEnemy(room, singleplayer);
-    if (rand > (spawn_threshold + 1) / 2) {
+    if (Math.random() > spawn_threshold + (singleplayer ? 0.2 : 0.1)) {
       spawnEnemy(room, singleplayer);
     }
   }
