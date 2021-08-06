@@ -598,7 +598,7 @@ io.on("connection", (socket) => {
       color: data.color,
       character: data.character,
       alive: true,
-      num_bombs: 2,
+      num_bombs: data.singleplayer ? 3 : 2,
       hits: 0,
       bombs_collected: 0
     };
