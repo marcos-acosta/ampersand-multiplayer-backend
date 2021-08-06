@@ -803,6 +803,10 @@ io.on("connection", (socket) => {
         delete room.players[username];
         if (Object.keys(room.players).length === 0) {
           delete rooms[room_keys[i]];
+        } else {
+          let other_player_username = Object.keys(room.players)[0];
+          let other_player_id = room.players[other_player_username].socket_id;
+          io.to(other_player_id).emit('partner_disconnected');
         }
         let indexInOrder = room.order.findIndex((uname) => uname === username);
         room.order.splice(indexInOrder, 1);
