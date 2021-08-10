@@ -703,6 +703,7 @@ io.on("connection", (socket) => {
           useBomb(room, position);
           player.num_bombs -= 1;
           direction = [0, 0];
+          room.streak = 0;
         }
       }
       // Move / attack
